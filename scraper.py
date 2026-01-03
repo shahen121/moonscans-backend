@@ -3,48 +3,41 @@ from bs4 import BeautifulSoup
 
 BASE_URL = "https://moonscans.net"
 
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://moonscans.net/"
+}
 
 def get_manga_list():
-    url = BASE_URL + "/manga/"
-    html = requests.get(url, timeout=15).text
+    html = requests.get(f"{BASE_URL}/manga/", headers=HEADERS, timeout=15).text
     soup = BeautifulSoup(html, "html.parser")
 
     mangas = []
-
     for item in soup.select(".bsx"):
-        a_tag = item.select_one("a")
-        img_tag = item.select_one("img")
-
-        if not a_tag or not img_tag:
+        a = item.select_one("a")
+        img = item.select_one("img")
+        if not a or not img:
             continue
 
-        title = img_tag.get("alt", "").strip()
-        link = a_tag["href"]
-        cover = img_tag["src"]
-
         mangas.append({
-            "title": title,
-            "slug": link.rstrip("/").split("/")[-1],
-            "cover": cover,
-            "url": link
+            "title": img.get("alt", "").strip(),
+            "slug": a["href"].rstrip("/").split("/")[-1],
+            "cover": img["src"],
+            "url": a["href"]
         })
 
     return mangas
 
 
 def get_manga_details(slug: str):
-    url = f"{BASE_URL}/manga/{slug}/"
-    html = requests.get(url, timeout=15).text
+    html = requests.get(
+        f"{BASE_URL}/manga/{slug}/",
+        headers=HEADERS,
+        timeout=15
+    ).text
+
     soup = BeautifulSoup(html, "html.parser")
-
-    title_tag = soup.select_one("h1")
-    title = title_tag.text.strip() if title_tag else ""
-
-    summary_tag = soup.select_one(".summary__content")
-    summary = summary_tag.text.strip() if summary_tag else ""
-
-    status_tag = soup.find("div", class_="post-status")
-    status = status_tag.text.strip() if status_tag else "Unknown"
 
     chapters = []
     for ch in soup.select(".wp-manga-chapter a"):
@@ -54,19 +47,23 @@ def get_manga_details(slug: str):
         })
 
     return {
-        "title": title,
-        "summary": summary,
-        "status": status,
+        "title": soup.select_one("h1").text.strip() if soup.select_one("h1") else "",
+        "summary": soup.select_one(".summary__content").text.strip() if soup.select_one(".summary__content") else "",
+        "status": soup.select_one(".post-status").text.strip() if soup.select_one(".post-status") else "Unknown",
         "chapters": chapters
     }
 
 
 def get_chapter_images(chapter_url: str):
-    html = requests.get(chapter_url, timeout=15).text
+    html = requests.get(
+        chapter_url,          # ✅ الرابط الصحيح
+        headers=HEADERS,      # ✅ نفس الهوية
+        timeout=15
+    ).text
+
     soup = BeautifulSoup(html, "html.parser")
 
     images = []
-
     for img in soup.select(".reading-content img"):
         src = img.get("data-src") or img.get("src")
         if src:
