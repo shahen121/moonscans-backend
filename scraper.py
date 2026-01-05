@@ -31,25 +31,39 @@ def get_manga_list():
 
 
 def get_manga_details(slug: str):
-    html = requests.get(
-        f"{BASE_URL}/manga/{slug}/",
-        headers=HEADERS,
-        timeout=15
-    ).text
-
+    url = f"{BASE_URL}/manga/{slug}/"
+    html = requests.get(url, headers=HEADERS, timeout=15).text
     soup = BeautifulSoup(html, "html.parser")
 
+    title = soup.select_one("h1")
+    title = title.text.strip() if title else ""
+
+    summary_tag = soup.select_one(".entry-content p")
+    summary = summary_tag.text.strip() if summary_tag else ""
+
     chapters = []
-    for ch in soup.select(".wp-manga-chapter a"):
+
+    # ✅ MoonScans chapters selector
+    for li in soup.select(".eplister li"):
+        a = li.select_one("a")
+        if not a:
+            continue
+
+        chapter_name = li.select_one(".chapternum")
+        chapter_name = chapter_name.text.strip() if chapter_name else "Chapter"
+
         chapters.append({
-            "name": ch.text.strip(),
-            "url": ch["href"]
+            "name": chapter_name,
+            "url": a["href"]
         })
 
+    # 🔁 ترتيب من الأقدم للأحدث
+    chapters.reverse()
+
     return {
-        "title": soup.select_one("h1").text.strip() if soup.select_one("h1") else "",
-        "summary": soup.select_one(".summary__content").text.strip() if soup.select_one(".summary__content") else "",
-        "status": soup.select_one(".post-status").text.strip() if soup.select_one(".post-status") else "Unknown",
+        "title": title,
+        "summary": summary,
+        "status": "Unknown",
         "chapters": chapters
     }
 
