@@ -84,16 +84,18 @@ def get_chapter_images(chapter_url: str):
     try:
         response = requests.get(chapter_url, headers=HEADERS, timeout=15)
         soup = BeautifulSoup(response.text, "html.parser")
-
+        
         images = []
-
-        for img in soup.select("img.ts-main-image"):
-            src = img.get("src")
-            if src:
-                images.append(src.strip())
-
+        # نبحث في منطقة القراءة الرئيسية #readerarea
+        container = soup.select_one("#readerarea")
+        if container:
+            for img in container.find_all("img"):
+                # نتحقق من جميع السمات المحتملة للرابط لضمان عدم نقص الصور 🖼️
+                url = img.get("data-src") or img.get("src") or img.get("data-lazy-src")
+                if url and "http" in url:
+                    images.append(url.strip())
+        
         return images
     except Exception as e:
-        print("Error in chapter images:", e)
+        print(f"Error: {e}")
         return []
-
