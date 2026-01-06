@@ -87,13 +87,13 @@ def get_chapter_images(chapter_url: str):
 
         images = []
 
-        # ✅ المكان الصحيح لصور MoonScans
         for img in soup.select("img.ts-main-image"):
             src = img.get("src")
-            if src and src.startswith("http"):
+            if src:
                 images.append(src.strip())
 
         return images
     except Exception as e:
         print("Error in chapter images:", e)
         return []
+
