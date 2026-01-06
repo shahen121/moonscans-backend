@@ -98,31 +98,22 @@ def get_chapter_images(chapter_url: str):
         
         images = []
         
-        # البحث عن الحاويات التي تبدأ بـ data-page (كما في الصورة)
-        page_containers = soup.find_all("div", attrs={"data-page": True})
+        # استهداف حاوية القارئ مباشرة لتقليل الضوضاء
+        reader_area = soup.select_one(".reader-mode, #readerarea, .flex-col.items-center")
         
-        for container in page_containers:
-            img_tag = container.find("img")
-            if img_tag:
-                # محاولة جلب الرابط من src أو data-src (للتغلب على الـ Lazy Load)
-                img_url = img_tag.get("src") or img_tag.get("data-src")
+        if reader_area:
+            img_tags = reader_area.find_all("img")
+            for img in img_tags:
+                # ترتيب البحث عن الرابط: data-src ثم src
+                img_url = img.get("data-src") or img.get("src")
                 
-                if img_url:
-                    # تنظيف الرابط
+                # تجاهل الصور الصغيرة (أيقونات) أو الصور التي ليست من سيرفر الصور
+                if img_url and "appswat" in img_url:
                     if img_url.startswith("//"):
                         img_url = "https:" + img_url
                     images.append(img_url.strip())
         
-        # إذا فشلت الطريقة الأولى، نبحث عن كل الصور داخل class="reader-mode"
-        if not images:
-            reader_div = soup.select_one(".reader-mode")
-            if reader_div:
-                for img in reader_div.find_all("img"):
-                    url = img.get("src") or img.get("data-src")
-                    if url and "appswat.com" in url: # النطاق الظاهر في الصورة
-                        images.append(url)
-
-        return images
+        return list(dict.fromkeys(images)) # إزالة التكرار إن وجد
     except Exception as e:
         print(f"Error: {e}")
         return []
