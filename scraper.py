@@ -84,10 +84,9 @@ def get_manga_details(slug: str):
         return {"title": "", "summary": "", "status": "", "chapters": []}
 
 def get_chapter_images(chapter_url: str):
-    """هذه الدالة الأهم - تم إصلاحها"""
+    """دالة محسّنة للحصول على صور الفصل الأصلية"""
     try:
-        # إضافة تأخير بسيط لتجنب الحجب
-        time.sleep(2)
+        print(f"جلب صور الفصل من: {chapter_url}")
         
         response = scraper.get(chapter_url, headers=HEADERS, timeout=30)
         response.raise_for_status()
@@ -96,30 +95,25 @@ def get_chapter_images(chapter_url: str):
         
         images = []
         
-        # ✅ البحث داخل div#readerarea
+        # ✅ البحث داخل div#readerarea (مكان صور الفصل)
         reader_area = soup.select_one("div#readerarea")
         if reader_area:
-            # البحث عن جميع صور ts-main-image
+            # البحث عن كل صور ts-main-image
             img_tags = reader_area.select("img.ts-main-image")
             
             for img in img_tags:
                 # الحصول على src مباشرة
-                img_url = img.get("src")
+                img_url = img.get("src") or img.get("data-src")
                 
-                # تجاهل صورة الـ placeholder
-                if not img_url or "readerarea.svg" in img_url:
+                # تجاهل صورة الـ placeholder والصور المصغرة
+                if not img_url or "readerarea.svg" in img_url or "?resize=" in img_url:
                     continue
                 
-                # تنظيف وتصحيح الروابط
+                # تنظيف الروابط
                 if img_url.startswith("//"):
                     img_url = "https:" + img_url
                 elif not img_url.startswith("http"):
                     img_url = BASE_URL + img_url
-                
-                # تحويل روابط wp.com إلى روابط مباشرة
-                if "wp.com" in img_url:
-                    img_url = img_url.replace("i3.wp.com/", "").replace("i1.wp.com/", "")
-                    img_url = img_url.replace("i2.wp.com/", "").replace("i0.wp.com/", "")
                 
                 images.append(img_url.strip())
         
@@ -129,12 +123,12 @@ def get_chapter_images(chapter_url: str):
             all_imgs = soup.select("img")
             for img in all_imgs:
                 img_url = img.get("src") or img.get("data-src")
-                if img_url and "uploads" in img_url:
+                if img_url and "uploads" in img_url and "?resize=" not in img_url:
                     images.append(img_url)
         
         print(f"✅ تم العثور على {len(images)} صورة")
         return images
         
     except Exception as e:
-        print(f"خطأ في جلب صور الفصل من {chapter_url}: {e}")
+        print(f"خطأ: {e}")
         return []
