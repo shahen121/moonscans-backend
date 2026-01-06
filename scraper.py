@@ -1,55 +1,88 @@
-import httpx
-from bs4 import BeautifulSoup
 import re
 from typing import List, Optional
-from models import (
-    ChapterInfo,
-    MangaInfo,
-    ChapterContent,
-    ChapterPage,
-    SearchResult,
-    MangaCard
-)
+from dataclasses import dataclass
+from bs4 import BeautifulSoup
+from playwright.async_api import async_playwright
 
 BASE_URL = "https://mangawy.app"
 
 
-# --------------------------------------------------
-# Fetch HTML
-# --------------------------------------------------
-async def fetch_page(url: str) -> Optional[str]:
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-        "Accept": "text/html,application/xhtml+xml",
-        "Accept-Language": "en-US,en;q=0.9,ar;q=0.8",
-        "Referer": "https://mangawy.app/",
-        "Origin": "https://mangawy.app",
-        "Connection": "keep-alive",
-    }
+# ------------------------------
+# Data Classes
+# ------------------------------
+@dataclass
+class ChapterPage:
+    page_number: int
+    image_url: str
+    alt_text: str
 
-    async with httpx.AsyncClient(
-        headers=headers,
-        follow_redirects=True,
-        timeout=30,
-    ) as client:
+@dataclass
+class ChapterContent:
+    manga_slug: str
+    manga_title: str
+    chapter_number: int
+    total_pages: int
+    pages: List[ChapterPage]
+    prev_chapter: Optional[int]
+    next_chapter: Optional[int]
+
+@dataclass
+class ChapterInfo:
+    number: int
+    title: str
+    url: str
+    is_available: bool
+
+@dataclass
+class MangaInfo:
+    title: str
+    slug: str
+    description: Optional[str]
+    cover_url: Optional[str]
+    total_chapters: int
+    source_url: str
+
+@dataclass
+class SearchResult:
+    title: str
+    slug: str
+
+@dataclass
+class MangaCard:
+    id: int
+    title: str
+    slug: str
+    cover_url: str
+    type: str
+    status: str
+    rating: float
+    views: int
+
+
+# ------------------------------
+# Playwright helper
+# ------------------------------
+async def fetch_page_content(url: str, wait: int = 3000) -> Optional[str]:
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        page = await browser.new_page()
         try:
-            r = await client.get(url)
-            if r.status_code == 403:
-                print(f"[BLOCKED] {url}")
-                return None
-            return r.text
+            await page.goto(url, timeout=60000)
+            await page.wait_for_timeout(wait)
+            html = await page.content()
         except Exception as e:
-            print(f"[FETCH ERROR] {url} -> {e}")
-            return None
+            print(f"[ERROR] Failed to fetch {url}: {e}")
+            html = None
+        await browser.close()
+        return html
 
 
-
-# --------------------------------------------------
+# ------------------------------
 # Chapters List
-# --------------------------------------------------
+# ------------------------------
 async def get_chapters_list(manga_slug: str) -> List[ChapterInfo]:
     url = f"{BASE_URL}/manga/{manga_slug}"
-    html = await fetch_page(url)
+    html = await fetch_page_content(url)
     if not html:
         return []
 
@@ -57,16 +90,13 @@ async def get_chapters_list(manga_slug: str) -> List[ChapterInfo]:
     chapters: List[ChapterInfo] = []
 
     links = soup.select(f'a[href^="/read/{manga_slug}/"]')
-
     for link in links:
         href = link.get("href", "")
-        match = re.search(r"/read/.+?/(\d+)", href)
+        match = re.search(r"/read/.+?/(\d+)(?:/|$)", href)
         if not match:
             continue
-
         number = int(match.group(1))
         title = link.get_text(strip=True) or f"الفصل {number}"
-
         chapters.append(
             ChapterInfo(
                 number=number,
@@ -80,70 +110,60 @@ async def get_chapters_list(manga_slug: str) -> List[ChapterInfo]:
     return chapters
 
 
-# --------------------------------------------------
+# ------------------------------
 # Manga Info
-# --------------------------------------------------
+# ------------------------------
 async def get_manga_info(manga_slug: str) -> Optional[MangaInfo]:
     url = f"{BASE_URL}/manga/{manga_slug}"
-    html = await fetch_page(url)
+    html = await fetch_page_content(url)
     if not html:
         return None
 
     soup = BeautifulSoup(html, "html.parser")
 
-    title = soup.find("h1")
-    title_text = title.get_text(strip=True) if title else manga_slug.replace("-", " ")
+    title_tag = soup.find("h1")
+    title_text = title_tag.get_text(strip=True) if title_tag else manga_slug.replace("-", " ")
 
-    description = soup.select_one("p.text-zinc-500")
-    desc_text = description.get_text(strip=True) if description else None
+    description_tag = soup.select_one("p.text-zinc-500")
+    description_text = description_tag.get_text(strip=True) if description_tag else None
 
-    cover = soup.find("img")
-    cover_url = cover.get("src") if cover else None
+    cover_tag = soup.find("img")
+    cover_url = cover_tag.get("src") if cover_tag else None
 
     chapters = await get_chapters_list(manga_slug)
 
     return MangaInfo(
         title=title_text,
         slug=manga_slug,
-        description=desc_text,
+        description=description_text,
         cover_url=cover_url,
         total_chapters=len(chapters),
         source_url=url
     )
 
 
-# --------------------------------------------------
-# Chapter Content (FIXED)
-# --------------------------------------------------
-async def get_chapter_content(
-    manga_slug: str,
-    chapter_number: int
-) -> Optional[ChapterContent]:
-
+# ------------------------------
+# Chapter Content
+# ------------------------------
+async def get_chapter_content(manga_slug: str, chapter_number: int) -> Optional[ChapterContent]:
     url = f"{BASE_URL}/read/{manga_slug}/{chapter_number}"
-    html = await fetch_page(url)
+    html = await fetch_page_content(url)
     if not html:
         return None
 
     soup = BeautifulSoup(html, "html.parser")
 
     # Manga title
-    manga_title = soup.find("h1") or soup.find("h2")
-    manga_title_text = (
-        manga_title.get_text(strip=True)
-        if manga_title else manga_slug.replace("-", " ")
-    )
+    manga_title_tag = soup.find("h1") or soup.find("h2")
+    manga_title = manga_title_tag.get_text(strip=True) if manga_title_tag else manga_slug.replace("-", " ")
 
-    # Pages (THE IMPORTANT PART)
+    # Pages
     pages: List[ChapterPage] = []
-
     image_nodes = soup.select("div[data-page] img")
-
     for idx, img in enumerate(image_nodes, start=1):
-        src = img.get("src") or img.get("data-src")
+        src = img.get("src") or img.get("data-src") or img.get("data-lazy")
         if not src:
             continue
-
         pages.append(
             ChapterPage(
                 page_number=idx,
@@ -153,11 +173,11 @@ async def get_chapter_content(
         )
 
     if not pages:
-        print("[WARNING] No pages found")
+        print(f"[WARNING] No pages found for {manga_slug} Chapter {chapter_number}")
 
     return ChapterContent(
         manga_slug=manga_slug,
-        manga_title=manga_title_text,
+        manga_title=manga_title,
         chapter_number=chapter_number,
         total_pages=len(pages),
         pages=pages,
@@ -166,12 +186,12 @@ async def get_chapter_content(
     )
 
 
-# --------------------------------------------------
+# ------------------------------
 # Search
-# --------------------------------------------------
+# ------------------------------
 async def search_manga(query: str, limit: int = 10) -> List[SearchResult]:
     url = f"{BASE_URL}/manga?search={query}"
-    html = await fetch_page(url)
+    html = await fetch_page_content(url)
     if not html:
         return []
 
@@ -179,28 +199,21 @@ async def search_manga(query: str, limit: int = 10) -> List[SearchResult]:
     results: List[SearchResult] = []
 
     cards = soup.select("a[href^='/manga/']")[:limit]
-
     for card in cards:
         title = card.get_text(strip=True)
         href = card.get("href", "")
         slug = href.split("/")[-1]
-
-        results.append(
-            SearchResult(
-                title=title,
-                slug=slug
-            )
-        )
+        results.append(SearchResult(title=title, slug=slug))
 
     return results
 
 
-# --------------------------------------------------
+# ------------------------------
 # Popular Manga
-# --------------------------------------------------
+# ------------------------------
 async def get_popular_manga(limit: int = 10) -> List[MangaCard]:
     url = f"{BASE_URL}/rankings"
-    html = await fetch_page(url)
+    html = await fetch_page_content(url)
     if not html:
         return []
 
@@ -208,11 +221,9 @@ async def get_popular_manga(limit: int = 10) -> List[MangaCard]:
     manga_list: List[MangaCard] = []
 
     items = soup.select("a[href^='/manga/']")[:limit]
-
     for idx, item in enumerate(items):
         title = item.get_text(strip=True)
         slug = item.get("href", "").split("/")[-1]
-
         manga_list.append(
             MangaCard(
                 id=idx,
