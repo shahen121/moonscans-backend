@@ -1,7 +1,16 @@
-import requests
+import cloudscraper
 from bs4 import BeautifulSoup
 
 BASE_URL = "https://moonscans.net"
+
+# استخدام cloudscraper بدل requests لمشكلة Cloudflare
+scraper = cloudscraper.create_scraper(
+    browser={
+        'browser': 'chrome',
+        'platform': 'windows',
+        'desktop': True
+    }
+)
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
@@ -12,7 +21,7 @@ HEADERS = {
 def get_manga_list():
     url = BASE_URL + "/manga/"
     try:
-        response = requests.get(url, headers=HEADERS, timeout=15)
+        response = scraper.get(url, headers=HEADERS, timeout=30)
         response.raise_for_status()
         html = response.text
         soup = BeautifulSoup(html, "html.parser")
@@ -21,7 +30,7 @@ def get_manga_list():
         for item in soup.select(".bsx"):
             a_tag = item.select_one("a")
             img_tag = item.select_one("img")
-            if not a_tag or not img_tag:
+            if not a_tag or not img_tag: 
                 continue
             
             mangas.append({
@@ -38,7 +47,7 @@ def get_manga_list():
 def get_manga_details(slug: str):
     url = f"{BASE_URL}/manga/{slug}/"
     try:
-        response = requests.get(url, headers=HEADERS, timeout=15)
+        response = scraper.get(url, headers=HEADERS, timeout=30)
         response.raise_for_status()
         html = response.text
         soup = BeautifulSoup(html, "html.parser")
@@ -55,13 +64,13 @@ def get_manga_details(slug: str):
         if summary_tag:
             summary = summary_tag.text.strip()
         
-        # استخراج الحالة (مستمرة/مكتملة)
+        # استخراج الحالة
         status = ""
         status_tag = soup.select_one(".imptdt")
         if status_tag:
             status = status_tag.text.strip()
         
-        # استخراج قائمة الفصول
+        # استخراج قائمة الفصول (من الأحدث للأقدم)
         chapters = []
         chapter_list = soup.select("div#chapterlist ul li")
         for chapter_item in chapter_list:
@@ -90,20 +99,27 @@ def get_manga_details(slug: str):
         }
 
 def get_chapter_images(chapter_url: str):
-    """هنا السطر الذي يحتاج التعديل - يجب إرسال الـheaders"""
+    """هذه هي الدالة التي كانت تحتاج التعديل"""
     try:
-        response = requests.get(chapter_url, headers=HEADERS, timeout=15)
+        # ✅ الآن نستخدم scraper مع الـheaders الصحيحة
+        response = scraper.get(chapter_url, headers=HEADERS, timeout=30)
         response.raise_for_status()
         html = response.text
         soup = BeautifulSoup(html, "html.parser")
         
         images = []
-        # البحث عن صور داخل قارئ المانجا
-        image_containers = soup.select("div#reader img, .reading-content img, .entry-content img")
+        # البحث عن صور داخل قارئ المانجا (اضبط الـselector حسب الموقع)
+        image_containers = soup.select("div#reader img, .reading-content img, .entry-content img, .page-break img")
         
         for img in image_containers:
-            img_url = img.get("src") or img.get("data-src")
+            img_url = img.get("src") or img.get("data-src") or img.get("data-lazy-src")
             if img_url:
+                # التأكد من أن الرابط كامل
+                if img_url.startswith("//"):
+                    img_url = "https:" + img_url
+                elif not img_url.startswith("http"):
+                    img_url = BASE_URL + img_url
+                
                 images.append(img_url.strip())
         
         return images
