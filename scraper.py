@@ -84,51 +84,38 @@ def get_manga_details(slug: str):
         return {"title": "", "summary": "", "status": "", "chapters": []}
 
 def get_chapter_images(chapter_url: str):
-    """دالة محسّنة للحصول على صور الفصل الأصلية"""
     try:
-        print(f"جلب صور الفصل من: {chapter_url}")
-        
         response = scraper.get(chapter_url, headers=HEADERS, timeout=30)
         response.raise_for_status()
-        html = response.text
-        soup = BeautifulSoup(html, "html.parser")
+        soup = BeautifulSoup(response.text, "html.parser")
         
         images = []
         
-        # ✅ البحث داخل div#readerarea (مكان صور الفصل)
-        reader_area = soup.select_one("div#readerarea")
-        if reader_area:
-            # البحث عن كل صور ts-main-image
-            img_tags = reader_area.select("img.ts-main-image")
-            
-            for img in img_tags:
-                # الحصول على src مباشرة
-                img_url = img.get("src") or img.get("data-src")
-                
-                # تجاهل صورة الـ placeholder والصور المصغرة
-                if not img_url or "readerarea.svg" in img_url or "?resize=" in img_url:
-                    continue
-                
-                # تنظيف الروابط
-                if img_url.startswith("//"):
-                    img_url = "https:" + img_url
-                elif not img_url.startswith("http"):
-                    img_url = BASE_URL + img_url
-                
-                images.append(img_url.strip())
+        # البحث عن الحاويات التي تبدأ بـ data-page (كما في الصورة)
+        page_containers = soup.find_all("div", attrs={"data-page": True})
         
-        # إذا لم نجد صور، نحاول طريقة بديلة
+        for container in page_containers:
+            img_tag = container.find("img")
+            if img_tag:
+                # محاولة جلب الرابط من src أو data-src (للتغلب على الـ Lazy Load)
+                img_url = img_tag.get("src") or img_tag.get("data-src")
+                
+                if img_url:
+                    # تنظيف الرابط
+                    if img_url.startswith("//"):
+                        img_url = "https:" + img_url
+                    images.append(img_url.strip())
+        
+        # إذا فشلت الطريقة الأولى، نبحث عن كل الصور داخل class="reader-mode"
         if not images:
-            print("لم يتم العثور على صور، جارٍ المحاولة بطريقة بديلة...")
-            all_imgs = soup.select("img")
-            for img in all_imgs:
-                img_url = img.get("src") or img.get("data-src")
-                if img_url and "uploads" in img_url and "?resize=" not in img_url:
-                    images.append(img_url)
-        
-        print(f"✅ تم العثور على {len(images)} صورة")
+            reader_div = soup.select_one(".reader-mode")
+            if reader_div:
+                for img in reader_div.find_all("img"):
+                    url = img.get("src") or img.get("data-src")
+                    if url and "appswat.com" in url: # النطاق الظاهر في الصورة
+                        images.append(url)
+
         return images
-        
     except Exception as e:
-        print(f"خطأ: {e}")
+        print(f"Error: {e}")
         return []
