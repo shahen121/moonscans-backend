@@ -80,40 +80,57 @@ def get_manga_details(slug: str):
         return None
 
 
+import requests
+from bs4 import BeautifulSoup
+
+# الرؤوس الضرورية لتجنب الحظر من الموقع 🛡️
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Referer": "https://moonscans.net/"
+}
+
 def get_chapter_images(chapter_url: str):
     try:
-        # 1. إرسال الطلب للموقع باستخدام الرؤوس (Headers) لتجنب الحظر
+        # إرسال طلب للموقع جلب محتوى الصفحة 🌐
         response = requests.get(chapter_url, headers=HEADERS, timeout=15)
         soup = BeautifulSoup(response.text, "html.parser")
 
         images = []
 
-        # 2. تحديد منطقة القراءة الرئيسية
+        # تحديد منطقة القراءة الرئيسية في الموقع 📖
+        # ملاحظة: الموقع غالباً يستخدم id="readerarea" لصور الفصل
         reader_area = soup.select_one("#readerarea")
         
         if reader_area:
-            # البحث عن كل وسوم img داخل منطقة القراءة
+            # البحث عن كل وسوم الصور داخل منطقة القراءة
             for img in reader_area.find_all("img"):
-                # 3. التحقق من عدة مصادر للرابط لضمان جلب الصورة حتى لو كانت Lazy Load
+                # محاولة جلب الرابط من عدة مصادر لضمان النجاح 🖼️
                 url = (
                     img.get("data-src") or 
                     img.get("src") or 
-                    img.get("data-lazy-src") or
-                    img.get("data-server")
+                    img.get("data-lazy-src")
                 )
 
                 if url:
                     clean_url = url.strip()
-                    # معالجة الروابط المختصرة التي تبدأ بـ //
+                    # إصلاح الروابط التي تبدأ بـ //
                     if clean_url.startswith("//"):
                         clean_url = "https:" + clean_url
                     
-                    # 💡 إضافة: فلتر بسيط للتأكد من أن الرابط هو صورة فعلاً وليس رابطاً عشوائياً
+                    # التأكد من إضافة الصور الحقيقية فقط
                     if any(ext in clean_url.lower() for ext in ['.jpg', '.jpeg', '.png', '.webp']):
                         images.append(clean_url)
 
         return images
 
     except Exception as e:
-        print(f"Error in get_chapter_images: {e}")
+        print(f"حدث خطأ أثناء جلب الصور: {e}")
         return []
+
+# --- تجربة الكود بالرابط الذي أرسلته ---
+test_url = "https://moonscans.net/%d8%a7%d9%84%d9%81%d8%b5%d9%84-%d8%b1%d9%82%d9%85-1-solo-leveling/"
+chapter_images = get_chapter_images(test_url)
+
+print(f"تم العثور على {len(chapter_images)} صورة.")
+for i, img_url in enumerate(chapter_images[:5]): # عرض أول 5 روابط للتأكد
+    print(f"صورة {i+1}: {img_url}")
