@@ -50,16 +50,21 @@ async def get_manga_info(manga_slug: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"خطأ في جلب المعلومات: {str(e)}")
 
-@app.get("/manga/{manga_slug}/chapter/{chapter_number}", response_model=ChapterContent)
-async def get_chapter_content(manga_slug: str, chapter_number: int):
-    """الحصول على محتوى الفصل (الصفحات)"""
+@app.get("/manga/{manga_slug}/chapters/live")
+async def get_manga_chapters_live(manga_slug: str):
+    """سحب فصول المانجا مباشرة من mangawy.app"""
     try:
-        chapter = await scraper.get_chapter_content(manga_slug, chapter_number)
-        if not chapter:
-            raise HTTPException(status_code=404, detail="الفصل غير موجود")
-        return chapter
+        chapters = await scraper.get_chapters_list(manga_slug)
+        if not chapters:
+            raise HTTPException(status_code=404, detail="المانجا غير موجودة في mangawy.app")
+        return {
+            "manga_slug": manga_slug,
+            "chapters": chapters,
+            "total_chapters": len(chapters),
+            "source": "mangawy.app (live)"
+        }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"خطأ في جلب الفصل: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"خطأ في جلب الفصول من mangawy.app: {str(e)}")
 
 @app.get("/search")
 async def search_manga(q: str = "", limit: int = 10):
