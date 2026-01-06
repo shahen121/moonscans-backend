@@ -34,31 +34,31 @@ def clean_url(url: str) -> str:
 
 # --- الدوال الرئيسية ---
 
-def get_manga_list() -> List[Dict[str, str]]:
-    """جلب قائمة المانجا من الصفحة الرئيسية"""
-    url = f"{BASE_URL}/manga/"
+def get_manga_list():
+    url = BASE_URL + "/manga/"
     try:
         response = scraper.get(url, headers=HEADERS, timeout=30)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.text, "html.parser")
+        # طباعة أول 500 حرف من الصفحة في الـ Logs للتأكد مما يراه السيرفر
+        print(f"DEBUG: Response Status: {response.status_code}")
+        print(f"DEBUG: HTML Content Snippet: {response.text[:500]}")
         
+        if "Just a moment..." in response.text or "cloudflare" in response.text.lower():
+            print("❌ تم الحجب بواسطة Cloudflare")
+            return [{"error": "Cloudflare Blocked the request"}]
+
+        soup = BeautifulSoup(response.text, "html.parser")
         mangas = []
-        # البحث عن العناصر التي تحتوي على المانجا (بناءً على الكلاس الشائع)
-        for item in soup.select(".bsx, .listupd .bs"):
-            a_tag = item.select_one("a")
-            img_tag = item.select_one("img")
+        
+        # تجربة سلكتور أكثر شمولاً
+        items = soup.select(".bsx") or soup.select(".listupd .bs") or soup.select("article")
+        
+        for item in items:
+            # ... (بقية كود الاستخراج السابق)
+            pass
             
-            if a_tag and img_tag:
-                cover_url = img_tag.get("src") or img_tag.get("data-src") or ""
-                mangas.append({
-                    "title": img_tag.get("alt", "").strip(),
-                    "slug": a_tag["href"].rstrip("/").split("/")[-1],
-                    "cover": clean_url(cover_url),
-                    "url": a_tag["href"]
-                })
         return mangas
     except Exception as e:
-        print(f"Error in get_manga_list: {e}")
+        print(f"خطأ: {e}")
         return []
 
 def get_manga_details(slug: str) -> Dict[str, Any]:
