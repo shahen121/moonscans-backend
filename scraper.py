@@ -56,32 +56,39 @@ def get_manga_details(slug: str):
     try:
         response = scraper.get(url, headers=HEADERS, timeout=30)
         response.raise_for_status()
-        html = response.text
-        soup = BeautifulSoup(html, "html.parser")
+        soup = BeautifulSoup(response.text, "html.parser")
         
-        title = soup.select_one("h1.entry-title").text.strip() if soup.select_one("h1.entry-title") else ""
-        summary = soup.select_one(".entry-content").text.strip() if soup.select_one(".entry-content") else ""
-        status = soup.select_one(".imptdt").text.strip() if soup.select_one(".imptdt") else ""
+        # جلب العنوان (مرن)
+        title_tag = soup.select_one("h1.entry-title") or soup.select_one(".manga-title")
+        title = title_tag.text.strip() if title_tag else ""
+        
+        # جلب القصة
+        summary_tag = soup.select_one(".entry-content") or soup.select_one(".synopsis")
+        summary = summary_tag.text.strip() if summary_tag else ""
         
         chapters = []
-        chapter_list = soup.select("div#chapterlist ul li")
-        for chapter_item in chapter_list:
-            a_tag = chapter_item.select_one("a")
-            if a_tag:
+        # البحث عن القائمة (المواقع الجديدة تستخدم كلاسات مثل .eplister أو تضع الفصول في جداول)
+        # سنبحث عن الروابط التي تحتوي على كلمة 'read' أو 'chapter'
+        chapter_links = soup.select("a[href*='/read/'], a[href*='/chapter/']")
+        
+        for a_tag in chapter_links:
+            name = a_tag.text.strip()
+            # استبعاد الروابط المكررة أو الفارغة
+            if name and "chapter" in a_tag['href'].lower() or "فصل" in name:
                 chapters.append({
-                    "name": a_tag.text.strip(),
+                    "name": name,
                     "url": a_tag["href"]
                 })
         
         return {
             "title": title,
             "summary": summary,
-            "status": status,
             "chapters": chapters
         }
     except Exception as e:
-        print(f"خطأ في جلب تفاصيل المانجا {slug}: {e}")
-        return {"title": "", "summary": "", "status": "", "chapters": []}
+        print(f"خطأ في التفاصيل: {e}")
+        return {"title": "", "summary": "", "chapters": []}
+        
 
 def get_chapter_images(chapter_url: str):
     try:
