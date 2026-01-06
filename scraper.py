@@ -88,29 +88,29 @@ def get_chapter_images(chapter_url: str):
 
         images = []
 
-        # 2. تحديد منطقة القراءة (غالباً ما تكون في div يحمل id="readerarea")
-        # هذا يضمن أننا نجلب صور الفصل فقط ولا نجلب إعلانات أو صور جانبية
+        # 2. تحديد منطقة القراءة الرئيسية
         reader_area = soup.select_one("#readerarea")
         
         if reader_area:
             # البحث عن كل وسوم img داخل منطقة القراءة
             for img in reader_area.find_all("img"):
-                # 3. التحقق من عدة مصادر للرابط (src, data-src, data-lazy-src)
-                # المواقع تستخدم هذه الحيل لتسريع التحميل
+                # 3. التحقق من عدة مصادر للرابط لضمان جلب الصورة حتى لو كانت Lazy Load
                 url = (
-                    img.get("src") or 
                     img.get("data-src") or 
+                    img.get("src") or 
                     img.get("data-lazy-src") or
-                    img.get("data-server") # بعض المواقع تضعه هنا
+                    img.get("data-server")
                 )
 
                 if url:
-                    # تنظيف الرابط والتأكد من أنه يبدأ بـ http
                     clean_url = url.strip()
+                    # معالجة الروابط المختصرة التي تبدأ بـ //
                     if clean_url.startswith("//"):
                         clean_url = "https:" + clean_url
                     
-                    images.append(clean_url)
+                    # 💡 إضافة: فلتر بسيط للتأكد من أن الرابط هو صورة فعلاً وليس رابطاً عشوائياً
+                    if any(ext in clean_url.lower() for ext in ['.jpg', '.jpeg', '.png', '.webp']):
+                        images.append(clean_url)
 
         return images
 
