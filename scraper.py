@@ -1,109 +1,317 @@
-import json
-import urllib.parse
+import httpx
 from bs4 import BeautifulSoup
-from curl_cffi import requests  # المكتبة الأقوى لتخطي Cloudflare
+import json
+import re
+from typing import List, Optional, Dict, Any
+from models import ChapterInfo, MangaInfo, ChapterContent, ChapterPage, SearchResult, MangaCard
+import asyncio
 
-# --- الإعدادات ---
-# ملاحظة: تأكد من تثبيت المكتبة عبر: pip install curl_cffi
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept-Language": "ar,en-US;q=0.9,en;q=0.8",
-}
+BASE_URL = "https://mangawy.app"
 
-def safe_get(url):
-    """محاكاة متصفح حقيقي لتجنب الحجب [cloudflare]"""
-    try:
-        # محاكاة بصمة متصفح Chrome 120 بالكامل
-        response = requests.get(url, impersonate="chrome120", headers=HEADERS, timeout=30)
-        return response
-    except Exception as e:
-        print(f"Request Error: {e}")
-        return None
-
-def get_manga_list(base_url):
-    """جلب قائمة المانجا - متوافق مع بنية الصور المرفقة"""
-    response = safe_get(f"{base_url}/manga/")
-    if not response or response.status_code != 200:
-        return []
-
-    soup = BeautifulSoup(response.text, "html.parser")
-    mangas = []
+async def fetch_page(url: str) -> Optional[str]:
+    """جلب صفحة HTML"""
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'ar,en-US;q=0.7,en;q=0.3',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+    }
     
-    # البحث عن المانجا في كلا القالبين (Madara و Custom)
-    items = soup.select(".bsx, .page-item-detail, .manga-item")
-    
-    for item in items:
-        a_tag = item.select_one("a")
-        img_tag = item.select_one("img")
-        if a_tag and img_tag:
-            cover = img_tag.get("data-src") or img_tag.get("src") or ""
-            mangas.append({
-                "title": img_tag.get("alt", "").strip(),
-                "slug": a_tag["href"].rstrip("/").split("/")[-1],
-                "cover": cover.split('?')[0], # تنظيف رابط الصورة
-                "url": a_tag["href"]
-            })
-    return mangas
-
-def get_manga_details(url):
-    """استخراج التفاصيل والفصول باستخدام JSON-LD والـ HTML"""
-    response = safe_get(url)
-    if not response: return {}
-
-    soup = BeautifulSoup(response.text, "html.parser")
-    
-    # محاولة جلب البيانات من JSON-LD لضمان الاستقرار
-    title, summary = "", ""
-    json_script = soup.find("script", type="application/ld+json")
-    if json_script:
+    async with httpx.AsyncClient(headers=headers, timeout=30.0) as client:
         try:
-            data = json.loads(json_script.string)
-            graph = data.get("@graph", [data])
-            for item in graph:
-                if item.get("@type") in ["Manga", "Article", "Product"]:
-                    title = item.get("name") or item.get("headline")
-                    summary = item.get("description")
-                    break
-        except: pass
+            response = await client.get(url)
+            response.raise_for_status()
+            return response.text
+        except Exception as e:
+            print(f"خطأ في جلب الصفحة {url}: {str(e)}")
+            return None
 
-    # إذا لم نجد JSON، نستخدم الـ Selectors التقليدية
-    if not title:
-        title_tag = soup.select_one("h1.entry-title, .post-title h1")
-        title = title_tag.text.strip() if title_tag else ""
+async def get_chapters_list(manga_slug: str) -> List[ChapterInfo]:
+    """الحصول على قائمة الفصول"""
+    url = f"{BASE_URL}/manga/{manga_slug}"
+    html = await fetch_page(url)
     
-    # استخراج الفصول - متوافق مع قالب Madara
+    if not html:
+        return []
+    
+    soup = BeautifulSoup(html, 'html.parser')
     chapters = []
-    chapter_links = soup.select(".wp-manga-chapter a, #chapterlist a, a[href*='/read/']")
-    for a in chapter_links:
-        name = a.text.strip()
-        if name and (any(c.isdigit() for c in name) or "فصل" in name):
-            chapters.append({
-                "name": name,
-                "url": a["href"]
-            })
     
-    return {"title": title, "summary": summary, "chapters": chapters}
+    # البحث عن روابط الفصول
+    chapter_links = soup.find_all('a', href=lambda x: x and f'/read/{manga_slug}/' in x)
+    
+    for link in chapter_links:
+        href = link.get('href', '')
+        # استخراج رقم الفصل من الرابط
+        match = re.search(rf'/read/{manga_slug}/(\d+)', href)
+        if match:
+            chapter_number = int(match.group(1))
+            
+            # الحصول على عنوان الفصل
+            title_elem = link.find('span', class_='chapter-title') or link.find('span') or link
+            title = title_elem.get_text(strip=True) if title_elem else f"الفصل {chapter_number}"
+            
+            chapters.append(ChapterInfo(
+                number=chapter_number,
+                title=title,
+                url=f"{BASE_URL}{href}" if href.startswith('/') else href,
+                is_available=True
+            ))
+    
+    # ترتيب الفصول تنازلياً (الأحدث أولاً)
+    chapters.sort(key=lambda x: x.number, reverse=True)
+    return chapters
 
-def get_chapter_images(chapter_url):
-    """جلب الصور بناءً على بنية DOM في الصورة"""
-    decoded_url = urllib.parse.unquote(chapter_url)
-    response = safe_get(decoded_url)
-    if not response: return []
+async def get_manga_info(manga_slug: str) -> Optional[MangaInfo]:
+    """الحصول على معلومات المانجا"""
+    url = f"{BASE_URL}/manga/{manga_slug}"
+    html = await fetch_page(url)
+    
+    if not html:
+        return None
+    
+    soup = BeautifulSoup(html, 'html.parser')
+    
+    # العنوان
+    title = soup.find('h1', class_='manga-title') or soup.find('h1')
+    title_text = title.get_text(strip=True) if title else manga_slug.replace('-', ' ').title()
+    
+    # الوصف
+    description = soup.find('div', class_='description') or soup.find('p', class_='description')
+    description_text = description.get_text(strip=True) if description else None
+    
+    # صورة الغلاف
+    cover_img = soup.find('img', class_='cover-image') or soup.find('img', alt=title_text)
+    cover_url = cover_img.get('src') if cover_img else None
+    
+    # المؤلف والفنان
+    author = None
+    artist = None
+    info_table = soup.find('div', class_='manga-info') or soup.find('table', class_='info')
+    if info_table:
+        for row in info_table.find_all(['tr', 'div']):
+            text = row.get_text()
+            if 'المؤلف' in text or 'author' in text.lower():
+                author = text.split(':')[-1].strip()
+            if 'الفنان' in text or 'artist' in text.lower():
+                artist = text.split(':')[-1].strip()
+    
+    # الحالة
+    status = soup.find('span', class_='status') or soup.find('span', class_='manga-status')
+    status_text = status.get_text(strip=True) if status else None
+    
+    # النوع
+    type_elem = soup.find('span', class_='type') or soup.find('a', class_='type')
+    type_text = type_elem.get_text(strip=True) if type_elem else None
+    
+    # التقييم
+    rating = soup.find('span', class_='rating') or soup.find('div', class_='rating')
+    if rating:
+        rating_match = re.search(r'[\d.]+', rating.get_text())
+        rating_value = float(rating_match.group()) if rating_match else None
+    else:
+        rating_value = None
+    
+    # عدد المشاهدات
+    views = soup.find('span', class_='views') or soup.find('div', class_='views')
+    if views:
+        views_text = views.get_text()
+        views_match = re.search(r'[\d,]+', views_text)
+        views_value = int(views_match.group().replace(',', '')) if views_match else None
+    else:
+        views_value = None
+    
+    # الأنواع
+    genres = []
+    genre_links = soup.find_all('a', class_='genre') or soup.find_all('a', href=lambda x: x and '/genre/' in x)
+    for genre in genre_links:
+        genres.append(genre.get_text(strip=True))
+    
+    # عدد الفصول
+    chapters = await get_chapters_list(manga_slug)
+    total_chapters = len(chapters)
+    
+    return MangaInfo(
+        title=title_text,
+        slug=manga_slug,
+        description=description_text,
+        cover_url=cover_url,
+        author=author,
+        artist=artist,
+        status=status_text,
+        type=type_text,
+        rating=rating_value,
+        views=views_value,
+        genres=genres,
+        total_chapters=total_chapters,
+        source_url=url
+    )
 
-    soup = BeautifulSoup(response.text, "html.parser")
-    images = []
+async def get_chapter_content(manga_slug: str, chapter_number: int) -> Optional[ChapterContent]:
+    """الحصول على محتوى الفصل (الصفحات)"""
+    url = f"{BASE_URL}/read/{manga_slug}/{chapter_number}"
+    html = await fetch_page(url)
+    
+    if not html:
+        return None
+    
+    soup = BeautifulSoup(html, 'html.parser')
+    
+    # العنوان
+    manga_title = soup.find('h1', class_='manga-title') or soup.find('h2', class_='manga-title')
+    manga_title_text = manga_title.get_text(strip=True) if manga_title else manga_slug.replace('-', ' ').title()
+    
+    # عنوان الفصل
+    chapter_title_elem = soup.find('h2', class_='chapter-title') or soup.find('span', class_='chapter-title')
+    chapter_title = chapter_title_elem.get_text(strip=True) if chapter_title_elem else None
+    
+    # صفحات الفصل
+    pages = []
+    page_images = soup.find_all('img', class_='page-image') or soup.find_all('img', {'data-page': True})
+    
+    if not page_images:
+        # محاولة العثور على الصور بطريقة أخرى
+        page_images = soup.find_all('img', src=lambda x: x and '.jpg' in x.lower() or '.png' in x.lower())
+    
+    for idx, img in enumerate(page_images):
+        img_url = img.get('src') or img.get('data-src')
+        if img_url:
+            pages.append(ChapterPage(
+                page_number=idx + 1,
+                image_url=img_url,
+                alt_text=img.get('alt', f"صفحة {idx + 1}")
+            ))
+    
+    # الفصل السابق والتالي
+    prev_chapter = chapter_number - 1 if chapter_number > 1 else None
+    next_chapter = chapter_number + 1 if len(pages) > 0 else None
+    
+    # المترجمون
+    translators = []
+    translator_elems = soup.find_all('span', class_='translator') or soup.find_all('div', class_='translator')
+    for elem in translator_elems:
+        translators.append(elem.get_text(strip=True))
+    
+    return ChapterContent(
+        manga_slug=manga_slug,
+        manga_title=manga_title_text,
+        chapter_number=chapter_number,
+        chapter_title=chapter_title,
+        total_pages=len(pages),
+        pages=pages,
+        prev_chapter=prev_chapter,
+        next_chapter=next_chapter,
+        translators=translators
+    )
 
-    # استهداف حاويات data-page كما يظهر في Inspect Element
-    reader_area = soup.select_one(".reader-mode, .reading-content, #readerarea")
-    if reader_area:
-        img_tags = reader_area.find_all("img")
-        for img in img_tags:
-            # ترتيب جلب الرابط لضمان تخطي Lazy Load
-            url = img.get("data-src") or img.get("src") or img.get("data-lazy-src")
-            if url and ("appswat" in url or "uploads" in url or "azoramoon" in url):
-                # تنظيف الرابط من التشفير أو التلاعب بالمقاسات
-                clean_url = url.split('?')[0].strip()
-                if clean_url.startswith("//"): clean_url = "https:" + clean_url
-                images.append(clean_url)
+async def search_manga(query: str, limit: int = 10) -> List[SearchResult]:
+    """البحث عن مانجا"""
+    search_url = f"{BASE_URL}/manga?search={query}"
+    html = await fetch_page(search_url)
+    
+    if not html:
+        return []
+    
+    soup = BeautifulSoup(html, 'html.parser')
+    results = []
+    
+    # البحث عن بطاقات المانجا
+    manga_cards = soup.find_all('div', class_='manga-card')[:limit]
+    
+    for card in manga_cards:
+        # العنوان والرابط
+        title_link = card.find('a', class_='manga-title') or card.find('h3').find('a') if card.find('h3') else None
+        if title_link:
+            title = title_link.get_text(strip=True)
+            href = title_link.get('href', '')
+            slug = href.split('/')[-1] if '/' in href else href
+        else:
+            continue
+        
+        # صورة الغلاف
+        cover_img = card.find('img')
+        cover_url = cover_img.get('src') if cover_img else None
+        
+        # الوصف
+        desc = card.find('p', class_='description') or card.find('div', class_='description')
+        description = desc.get_text(strip=True)[:200] if desc else None
+        
+        # الحالة
+        status = card.find('span', class_='status') or card.find('div', class_='status')
+        status_text = status.get_text(strip=True) if status else None
+        
+        # النوع
+        type_elem = card.find('span', class_='type') or card.find('div', class_='type')
+        type_text = type_elem.get_text(strip=True) if type_elem else None
+        
+        results.append(SearchResult(
+            title=title,
+            slug=slug,
+            cover_url=cover_url,
+            description=description,
+            status=status_text,
+            type=type_text
+        ))
+    
+    return results
 
-    return list(dict.fromkeys(images)) # حذف التكرار مع الحفاظ على الترتيب
+async def get_popular_manga(limit: int = 10) -> List[MangaCard]:
+    """الحصول على المانجا الشائعة"""
+    url = f"{BASE_URL}/rankings"
+    html = await fetch_page(url)
+    
+    if not html:
+        return []
+    
+    soup = BeautifulSoup(html, 'html.parser')
+    manga_list = []
+    
+    # البحث عن المانجا الشائعة
+    popular_items = soup.find_all('div', class_='ranking-item')[:limit]
+    
+    for idx, item in enumerate(popular_items):
+        # العنوان والرابط
+        title_elem = item.find('h3') or item.find('a', class_='title')
+        if title_elem and title_elem.find('a'):
+            title = title_elem.find('a').get_text(strip=True)
+            href = title_elem.find('a').get('href', '')
+            slug = href.split('/')[-1] if '/' in href else str(idx)
+        else:
+            continue
+        
+        # صورة الغلاف
+        cover_img = item.find('img')
+        cover_url = cover_img.get('src') if cover_img else None
+        
+        # المشاهدات
+        views_elem = item.find('span', class_='views') or item.find('div', class_='views')
+        views = 0
+        if views_elem:
+            views_text = views_elem.get_text()
+            views_match = re.search(r'[\d,]+', views_text)
+            if views_match:
+                views = int(views_match.group().replace(',', ''))
+        
+        # التقييم
+        rating_elem = item.find('span', class_='rating') or item.find('div', class_='rating')
+        rating = 0.0
+        if rating_elem:
+            rating_text = rating_elem.get_text()
+            rating_match = re.search(r'[\d.]+', rating_text)
+            if rating_match:
+                rating = float(rating_match.group())
+        
+        manga_list.append(MangaCard(
+            id=idx,
+            title=title,
+            slug=slug,
+            cover_url=cover_url,
+            type="manhwa",  # افتراضي
+            status="ongoing",  # افتراضي
+            rating=rating,
+            views=views
+        ))
+    
+    return manga_list
