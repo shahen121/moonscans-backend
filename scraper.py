@@ -82,20 +82,38 @@ def get_manga_details(slug: str):
 
 def get_chapter_images(chapter_url: str):
     try:
+        # 1. إرسال الطلب للموقع باستخدام الرؤوس (Headers) لتجنب الحظر
         response = requests.get(chapter_url, headers=HEADERS, timeout=15)
         soup = BeautifulSoup(response.text, "html.parser")
-        
+
         images = []
-        # نبحث في منطقة القراءة الرئيسية #readerarea
-        container = soup.select_one("#readerarea")
-        if container:
-            for img in container.find_all("img"):
-                # نتحقق من جميع السمات المحتملة للرابط لضمان عدم نقص الصور 🖼️
-                url = img.get("data-src") or img.get("src") or img.get("data-lazy-src")
-                if url and "http" in url:
-                    images.append(url.strip())
+
+        # 2. تحديد منطقة القراءة (غالباً ما تكون في div يحمل id="readerarea")
+        # هذا يضمن أننا نجلب صور الفصل فقط ولا نجلب إعلانات أو صور جانبية
+        reader_area = soup.select_one("#readerarea")
         
+        if reader_area:
+            # البحث عن كل وسوم img داخل منطقة القراءة
+            for img in reader_area.find_all("img"):
+                # 3. التحقق من عدة مصادر للرابط (src, data-src, data-lazy-src)
+                # المواقع تستخدم هذه الحيل لتسريع التحميل
+                url = (
+                    img.get("src") or 
+                    img.get("data-src") or 
+                    img.get("data-lazy-src") or
+                    img.get("data-server") # بعض المواقع تضعه هنا
+                )
+
+                if url:
+                    # تنظيف الرابط والتأكد من أنه يبدأ بـ http
+                    clean_url = url.strip()
+                    if clean_url.startswith("//"):
+                        clean_url = "https:" + clean_url
+                    
+                    images.append(clean_url)
+
         return images
+
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"Error in get_chapter_images: {e}")
         return []
