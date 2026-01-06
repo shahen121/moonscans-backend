@@ -19,21 +19,29 @@ BASE_URL = "https://mangawy.app"
 # --------------------------------------------------
 async def fetch_page(url: str) -> Optional[str]:
     headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/120.0.0.0 Safari/537.36"
-        )
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+        "Accept": "text/html,application/xhtml+xml",
+        "Accept-Language": "en-US,en;q=0.9,ar;q=0.8",
+        "Referer": "https://mangawy.app/",
+        "Origin": "https://mangawy.app",
+        "Connection": "keep-alive",
     }
 
-    async with httpx.AsyncClient(headers=headers, timeout=30) as client:
+    async with httpx.AsyncClient(
+        headers=headers,
+        follow_redirects=True,
+        timeout=30,
+    ) as client:
         try:
             r = await client.get(url)
-            r.raise_for_status()
+            if r.status_code == 403:
+                print(f"[BLOCKED] {url}")
+                return None
             return r.text
         except Exception as e:
             print(f"[FETCH ERROR] {url} -> {e}")
             return None
+
 
 
 # --------------------------------------------------
