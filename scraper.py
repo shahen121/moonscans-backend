@@ -1,15 +1,17 @@
 import cloudscraper
 from bs4 import BeautifulSoup
+import time
 
 BASE_URL = "https://moonscans.net"
 
-# استخدام cloudscraper بدل requests لمشكلة Cloudflare
+# استخدام cloudscraper للتغلب على Cloudflare
 scraper = cloudscraper.create_scraper(
     browser={
         'browser': 'chrome',
         'platform': 'windows',
         'desktop': True
-    }
+    },
+    delay=10  # تأخير 10 ثواني لإعادة المحاولة إذا تم حجبنا
 )
 
 HEADERS = {
@@ -33,10 +35,15 @@ def get_manga_list():
             if not a_tag or not img_tag: 
                 continue
             
+            cover_url = img_tag.get("src", "")
+            # تحويل روابط wp.com إلى روابط مباشرة
+            if "wp.com" in cover_url:
+                cover_url = cover_url.replace("i3.wp.com/", "").replace("i1.wp.com/", "")
+            
             mangas.append({
                 "title": img_tag.get("alt", "").strip(),
                 "slug": a_tag["href"].rstrip("/").split("/")[-1],
-                "cover": img_tag["src"],
+                "cover": cover_url,
                 "url": a_tag["href"]
             })
         return mangas
@@ -52,35 +59,18 @@ def get_manga_details(slug: str):
         html = response.text
         soup = BeautifulSoup(html, "html.parser")
         
-        # استخراج العنوان
-        title = ""
-        title_tag = soup.select_one("h1.entry-title")
-        if title_tag:
-            title = title_tag.text.strip()
+        title = soup.select_one("h1.entry-title").text.strip() if soup.select_one("h1.entry-title") else ""
+        summary = soup.select_one(".entry-content").text.strip() if soup.select_one(".entry-content") else ""
+        status = soup.select_one(".imptdt").text.strip() if soup.select_one(".imptdt") else ""
         
-        # استخراج الوصف
-        summary = ""
-        summary_tag = soup.select_one(".entry-content")
-        if summary_tag:
-            summary = summary_tag.text.strip()
-        
-        # استخراج الحالة
-        status = ""
-        status_tag = soup.select_one(".imptdt")
-        if status_tag:
-            status = status_tag.text.strip()
-        
-        # استخراج قائمة الفصول (من الأحدث للأقدم)
         chapters = []
         chapter_list = soup.select("div#chapterlist ul li")
         for chapter_item in chapter_list:
             a_tag = chapter_item.select_one("a")
             if a_tag:
-                chapter_name = a_tag.text.strip()
-                chapter_url = a_tag["href"]
                 chapters.append({
-                    "name": chapter_name,
-                    "url": chapter_url
+                    "name": a_tag.text.strip(),
+                    "url": a_tag["href"]
                 })
         
         return {
@@ -91,38 +81,60 @@ def get_manga_details(slug: str):
         }
     except Exception as e:
         print(f"خطأ في جلب تفاصيل المانجا {slug}: {e}")
-        return {
-            "title": "",
-            "summary": "",
-            "status": "",
-            "chapters": []
-        }
+        return {"title": "", "summary": "", "status": "", "chapters": []}
 
 def get_chapter_images(chapter_url: str):
-    """هذه هي الدالة التي كانت تحتاج التعديل"""
+    """هذه الدالة الأهم - تم إصلاحها"""
     try:
-        # ✅ الآن نستخدم scraper مع الـheaders الصحيحة
+        # إضافة تأخير بسيط لتجنب الحجب
+        time.sleep(2)
+        
         response = scraper.get(chapter_url, headers=HEADERS, timeout=30)
         response.raise_for_status()
         html = response.text
         soup = BeautifulSoup(html, "html.parser")
         
         images = []
-        # البحث عن صور داخل قارئ المانجا (اضبط الـselector حسب الموقع)
-        image_containers = soup.select("div#reader img, .reading-content img, .entry-content img, .page-break img")
         
-        for img in image_containers:
-            img_url = img.get("src") or img.get("data-src") or img.get("data-lazy-src")
-            if img_url:
-                # التأكد من أن الرابط كامل
+        # ✅ البحث داخل div#readerarea
+        reader_area = soup.select_one("div#readerarea")
+        if reader_area:
+            # البحث عن جميع صور ts-main-image
+            img_tags = reader_area.select("img.ts-main-image")
+            
+            for img in img_tags:
+                # الحصول على src مباشرة
+                img_url = img.get("src")
+                
+                # تجاهل صورة الـ placeholder
+                if not img_url or "readerarea.svg" in img_url:
+                    continue
+                
+                # تنظيف وتصحيح الروابط
                 if img_url.startswith("//"):
                     img_url = "https:" + img_url
                 elif not img_url.startswith("http"):
                     img_url = BASE_URL + img_url
                 
+                # تحويل روابط wp.com إلى روابط مباشرة
+                if "wp.com" in img_url:
+                    img_url = img_url.replace("i3.wp.com/", "").replace("i1.wp.com/", "")
+                    img_url = img_url.replace("i2.wp.com/", "").replace("i0.wp.com/", "")
+                
                 images.append(img_url.strip())
         
+        # إذا لم نجد صور، نحاول طريقة بديلة
+        if not images:
+            print("لم يتم العثور على صور، جارٍ المحاولة بطريقة بديلة...")
+            all_imgs = soup.select("img")
+            for img in all_imgs:
+                img_url = img.get("src") or img.get("data-src")
+                if img_url and "uploads" in img_url:
+                    images.append(img_url)
+        
+        print(f"✅ تم العثور على {len(images)} صورة")
         return images
+        
     except Exception as e:
         print(f"خطأ في جلب صور الفصل من {chapter_url}: {e}")
         return []
