@@ -3,96 +3,110 @@ from bs4 import BeautifulSoup
 
 BASE_URL = "https://moonscans.net"
 
-# هوية المتصفح لتجنب الحظر
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
     "Accept-Language": "en-US,en;q=0.9",
-    "Referer": "https://moonscans.net/",
-    "Connection": "keep-alive",
-    "Upgrade-Insecure-Requests": "1"
+    "Referer": "https://moonscans.net/"
 }
 
-
-
 def get_manga_list():
+    url = BASE_URL + "/manga/"
     try:
-        response = requests.get(f"{BASE_URL}/manga/", headers=HEADERS, timeout=15)
-        soup = BeautifulSoup(response.text, "html.parser")
-
+        response = requests.get(url, headers=HEADERS, timeout=15)
+        response.raise_for_status()
+        html = response.text
+        soup = BeautifulSoup(html, "html.parser")
+        
         mangas = []
         for item in soup.select(".bsx"):
-            a = item.select_one("a")
-            img = item.select_one("img")
-            if not a or not img:
+            a_tag = item.select_one("a")
+            img_tag = item.select_one("img")
+            if not a_tag or not img_tag:
                 continue
-
+            
             mangas.append({
-                "title": img.get("alt", "").strip(),
-                "slug": a["href"].rstrip("/").split("/")[-1],
-                "cover": img.get("src"),
-                "url": a["href"]
+                "title": img_tag.get("alt", "").strip(),
+                "slug": a_tag["href"].rstrip("/").split("/")[-1],
+                "cover": img_tag["src"],
+                "url": a_tag["href"]
             })
-
         return mangas
     except Exception as e:
-        print("Error in manga list:", e)
+        print(f"خطأ في جلب قائمة المانجا: {e}")
         return []
 
-
 def get_manga_details(slug: str):
+    url = f"{BASE_URL}/manga/{slug}/"
     try:
-        url = f"{BASE_URL}/manga/{slug}/"
         response = requests.get(url, headers=HEADERS, timeout=15)
-        soup = BeautifulSoup(response.text, "html.parser")
-
-        # جلب قائمة الفصول من المكان الصحيح في Moonscans
-        chapters = []
-        # الموقع يستخدم كلاس eplister أو وسم مشابه للفصول
-        chapter_elements = soup.select(".eplister li")
+        response.raise_for_status()
+        html = response.text
+        soup = BeautifulSoup(html, "html.parser")
         
-        for li in chapter_elements:
-            a_tag = li.select_one("a")
+        # استخراج العنوان
+        title = ""
+        title_tag = soup.select_one("h1.entry-title")
+        if title_tag:
+            title = title_tag.text.strip()
+        
+        # استخراج الوصف
+        summary = ""
+        summary_tag = soup.select_one(".entry-content")
+        if summary_tag:
+            summary = summary_tag.text.strip()
+        
+        # استخراج الحالة (مستمرة/مكتملة)
+        status = ""
+        status_tag = soup.select_one(".imptdt")
+        if status_tag:
+            status = status_tag.text.strip()
+        
+        # استخراج قائمة الفصول
+        chapters = []
+        chapter_list = soup.select("div#chapterlist ul li")
+        for chapter_item in chapter_list:
+            a_tag = chapter_item.select_one("a")
             if a_tag:
-                name = li.select_one(".chapternum").text.strip() if li.select_one(".chapternum") else "Chapter"
-                link = a_tag['href']
+                chapter_name = a_tag.text.strip()
+                chapter_url = a_tag["href"]
                 chapters.append({
-                    "name": name,
-                    "url": link
+                    "name": chapter_name,
+                    "url": chapter_url
                 })
-
-        # ترتيب الفصول من الأقدم للأحدث (اختياري)
-        chapters.reverse() 
-
+        
         return {
-            "title": soup.select_one("h1.entry-title").text.strip() if soup.select_one("h1.entry-title") else "Unknown",
-            "cover": soup.select_one(".thumb img")["src"] if soup.select_one(".thumb img") else "",
-            "summary": soup.select_one(".entry-content p").text.strip() if soup.select_one(".entry-content p") else "",
+            "title": title,
+            "summary": summary,
+            "status": status,
             "chapters": chapters
         }
     except Exception as e:
-        print(f"Error in details: {e}")
-        return None
+        print(f"خطأ في جلب تفاصيل المانجا {slug}: {e}")
+        return {
+            "title": "",
+            "summary": "",
+            "status": "",
+            "chapters": []
+        }
 
 def get_chapter_images(chapter_url: str):
+    """هنا السطر الذي يحتاج التعديل - يجب إرسال الـheaders"""
     try:
-        # التأكد من أننا نستخدم الرابط الحقيقي الممرر
         response = requests.get(chapter_url, headers=HEADERS, timeout=15)
-        soup = BeautifulSoup(response.text, "html.parser")
+        response.raise_for_status()
+        html = response.text
+        soup = BeautifulSoup(html, "html.parser")
+        
         images = []
-
-        # في Moonscans، الصور موجودة داخل div بـ id="readerarea"
-        reader_area = soup.select_one("#readerarea")
-        if reader_area:
-            for img in reader_area.find_all("img"):
-                # جلب الرابط مع مراعاة التحميل المتأخر
-                url = img.get("data-src") or img.get("src") or img.get("data-lazy-src")
-                if url:
-                    url = url.strip()
-                    if url.startswith("//"): url = "https:" + url
-                    if any(ext in url.lower() for ext in ['.jpg', '.jpeg', '.png', '.webp']):
-                        images.append(url)
+        # البحث عن صور داخل قارئ المانجا
+        image_containers = soup.select("div#reader img, .reading-content img, .entry-content img")
+        
+        for img in image_containers:
+            img_url = img.get("src") or img.get("data-src")
+            if img_url:
+                images.append(img_url.strip())
+        
         return images
     except Exception as e:
-        print(f"Error in images: {e}")
+        print(f"خطأ في جلب صور الفصل من {chapter_url}: {e}")
         return []
