@@ -2,7 +2,7 @@ import cloudscraper
 from bs4 import BeautifulSoup
 import time
 
-BASE_URL = "https://moonscans.net"
+BASE_URL = "https://mangawy.app"
 
 # استخدام cloudscraper للتغلب على Cloudflare
 scraper = cloudscraper.create_scraper(
