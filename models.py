@@ -1,13 +1,10 @@
 from pydantic import BaseModel
-from typing import List
-
-class MangaResult(BaseModel):
-    title: str
-    url: str
+from typing import List, Optional
 
 class Chapter(BaseModel):
     chapter_title: str
     chapter_url: str
 
-class ChapterContent(BaseModel):
+class MangaData(BaseModel):
+    chapters: List[Chapter]
     images: List[str]
