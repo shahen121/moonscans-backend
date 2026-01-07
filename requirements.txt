@@ -1,18 +1,7 @@
-مكتبات التحكم في المتصفح وتجاوز الحماية
-
+# مكتبات التحكم في المتصفح وتجاوز الحماية
+playwright
 undetected-chromedriver
 selenium
-
-مكتبات تحليل محتوى الصفحات
-
-beautifulsoup4
-lxml
-
-تنظيم وهيكلة البيانات
-
-pydantic
-
-التعامل مع الصور والطلبات السريعة
-
+fastapi==0.95.2
+uvicorn[standard]==0.22.0
 requests
-pillow
