@@ -1,4 +1,18 @@
-fastapi
-uvicorn
-playwright
-playwright-stealth
+مكتبات التحكم في المتصفح وتجاوز الحماية
+
+undetected-chromedriver
+selenium
+
+مكتبات تحليل محتوى الصفحات
+
+beautifulsoup4
+lxml
+
+تنظيم وهيكلة البيانات
+
+pydantic
+
+التعامل مع الصور والطلبات السريعة
+
+requests
+pillow
