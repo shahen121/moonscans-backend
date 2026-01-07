@@ -1,13 +1,14 @@
-from pydantic import BaseModel
-from typing import List
+from fastapi import FastAPI
+from scraper import AzoraScraper
 
-class MangaResult(BaseModel):
-    title: str
-    url: str
+app = FastAPI()
+scraper = AzoraScraper()
 
-class Chapter(BaseModel):
-    chapter_title: str
-    chapter_url: str
+@app.get("/")
+async def root():
+    return {"message": "Azora Moon API is Running!"}
 
-class ChapterContent(BaseModel):
-    images: List[str]
+@app.get("/manga-info")
+async def get_manga(url: str):
+    data = await scraper.get_page_content(url)
+    return data
