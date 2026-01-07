@@ -1,14 +1,10 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 from scraper import AzoraScraper
 
-app = FastAPI()
+app = FastAPI(title="Azora Moon API")
 scraper = AzoraScraper()
 
-@app.get("/")
-async def root():
-    return {"message": "Azora Moon API is Running!"}
-
-@app.get("/manga-info")
-async def get_manga(url: str):
+@app.get("/fetch")
+async def fetch_manga(url: str = Query(..., description="رابط المانجا أو الفصل")):
     data = await scraper.get_page_content(url)
     return data
